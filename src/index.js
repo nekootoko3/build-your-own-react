@@ -51,14 +51,20 @@ function commitWork(fiber) {
     return;
   }
 
+  // 関数コンポーネントから作られるファイバーには dom ノードがないので DOMノードを持つファイバーが見つかるまでファイバーツリーを上に移動
+  let domParentFiber = fiber.parent;
+  while (!domParentFiber.dom) {
+    domParentFiber = domParentFiber.parent;
+  }
+  const domParent = domParentFiber.dom;
+
   // fiber の effectTag に応じて fiber.dom を dom に反映する
-  const domParent = fiber.parent.dom;
   if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
     domParent.appendChild(fiber.dom);
   } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
     updateDom(fiber.dom, fiber.alternate.props, fiber.props);
   } else if (fiber.effectTag === "DELETION") {
-    domParent.removeChild(fiber.dom);
+    commitDeletion(fiber, domParent); // ノードを削除するときは、DOMノードを持つ子が見つかるまで探索を続行
   }
 
   // child と sibling も再帰的に処理
@@ -105,6 +111,14 @@ function updateDom(dom, prevProps, nextProps) {
     });
 }
 
+function commitDeletion(fiber, domParent) {
+  if (fiber.dom) {
+    domParent.removeChild(fiber.dom);
+  } else {
+    commitDeletion(fiber.child, domParent);
+  }
+}
+
 function workLoop(deadline) {
   // rendering phase
   let shouldYield = false;
@@ -125,9 +139,11 @@ function workLoop(deadline) {
 requestIdleCallback(workLoop);
 
 function performUnitOfWork(fiber) {
-  // もし追加されていなければ、自身の dom を fiber から作成し親ノードに追加
-  if (!fiber.dom) {
-    fiber.dom = createDom(fiber);
+  const isFunctionComponent = fiber.type instanceof Function;
+  if (isFunctionComponent) {
+    updateFunctionComponent(fiber);
+  } else {
+    updateHostComponent(fiber);
   }
 
   // 子要素ごとに新しいファイバーを作成
@@ -147,7 +163,20 @@ function performUnitOfWork(fiber) {
   }
 }
 
-// 古いファイバーと新しいファイバーを比較する
+function updateFunctionComponent(fiber) {
+  const children = [fiber.type(fiber.props)];
+  reconcileChildren(fiber, children);
+}
+
+function updateHostComponent(fiber) {
+  // もし追加されていなければ、自身の dom を fiber から作成し親ノードに追加
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+  reconcileChildren(fiber, fiber.props.children);
+}
+
+// wipFiber の子とその兄弟について、古いファイバーと新しいファイバーを比較し wipFiber を更新する
 function reconcileChildren(wipFiber, elements) {
   let index = 0;
   let oldFiber = wipFiber.alternate && wipFiber.alternate.child;
@@ -227,12 +256,10 @@ const Didact = {
 };
 
 /** @jsx Didact.createElement */
-const element = (
-  <div id="foo">
-    <a>bar</a>
-    <b />
-  </div>
-);
+function App(props) {
+  return <h1>Hi {props.name}</h1>;
+}
 
+const element = <App name="foo" />;
 const container = document.getElementById("root");
 Didact.render(element, container);
