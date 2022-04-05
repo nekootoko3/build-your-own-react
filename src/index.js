@@ -120,6 +120,8 @@ function commitDeletion(fiber, domParent) {
   }
 }
 
+// requestIdleCallback によってメインスレッドが空いた時に実行される関数
+// 作業単位を分割しての rendering -> commit を行う
 function workLoop(deadline) {
   // rendering phase
   let shouldYield = false;
@@ -212,7 +214,7 @@ function updateHostComponent(fiber) {
   reconcileChildren(fiber, fiber.props.children);
 }
 
-// wipFiber の子とその兄弟について、古いファイバーと新しいファイバーを比較し wipFiber を更新する
+// wipFiber の子とその兄弟について、現在の仮想 dom を形成するファイバーと新たに作成される fiber の元となる element の type を比較し wipFiber を更新する
 function reconcileChildren(wipFiber, elements) {
   let index = 0;
   let oldFiber = wipFiber.alternate && wipFiber.alternate.child;
@@ -225,7 +227,7 @@ function reconcileChildren(wipFiber, elements) {
 
     const sameType = oldFiber && element && element.type === oldFiber.type;
 
-    // 古いファイバーとelementが同じタイプの場合、dom を古いファイバーから保持し、props は element から保持するように、新しいファイバーを作成
+    // 古いファイバーとelementが同じタイプの場合、dom を古いファイバーから取り、props は element から保持するように新しいファイバーを作成
     if (sameType) {
       newFiber = {
         type: oldFiber.type,
@@ -247,7 +249,7 @@ function reconcileChildren(wipFiber, elements) {
         effectTag: "PLACEMENT",
       };
     }
-    // ノードを削除する必要がある場合は、新しいファイバーがないため、古いファイバーにエフェクトタグを追加
+    // ノードを削除する必要がある場合は、新しいファイバーがないため、古いファイバーにエフェクトタグを追加し、deletions に追加
     if (oldFiber && !sameType) {
       oldFiber.effectTag = "DELETION";
       deletions.push(oldFiber);
