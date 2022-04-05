@@ -20,29 +20,50 @@ function createTextElement(text) {
   };
 }
 
+let nextUnitOfWork = null;
+let wipRoot = null;
+
 function render(element, container) {
-  nextUnitOfWork = {
+  wipRoot = {
     dom: container,
     props: {
       children: [element],
     },
   };
-
-  // 子要素を再帰的にノードに追加
-  //element.props.children.forEach((child) => render(child, dom));
-
-  // 作成したノードを container に追加
-  //container.appendChild(dom);
+  nextUnitOfWork = wipRoot;
 }
 
-let nextUnitOfWork = null;
+function commitRoot() {
+  // dom に node を追加する
+  commitWork(wipRoot.child);
+  wipRoot = null;
+}
+
+function commitWork(fiber) {
+  if (!fiber) {
+    return;
+  }
+
+  // 全ての node を dom に再帰的に追加する
+  const domParent = fiber.parent.dom;
+  domParent.appendChild(fiber.dom);
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
+}
 
 function workLoop(deadline) {
+  // rendering phase
   let shouldYield = false;
   while (nextUnitOfWork && !shouldYield) {
     nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
     shouldYield = deadline.timeRemaining() < 1;
   }
+
+  // commit phase
+  if (!nextUnitOfWork && wipRoot) {
+    commitRoot();
+  }
+
   requestIdleCallback(workLoop);
 }
 
@@ -53,9 +74,6 @@ function performUnitOfWork(fiber) {
   // もし追加されていなければ、自身の dom を fiber から作成し親ノードに追加
   if (!fiber.dom) {
     fiber.dom = createDom(fiber);
-  }
-  if (fiber.parent) {
-    fiber.parent.dom.appendChild(fiber.dom);
   }
 
   // 子要素ごとに新しいファイバーを作成
