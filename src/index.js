@@ -26,6 +26,7 @@ let wipRoot = null;
 let deletions = null;
 
 function commitRoot() {
+  deletions.forEach(commitWork);
   // dom に node を追加する
   commitWork(wipRoot.child);
   // dom にコミットした最後のファイバーツリーを currentRoot として参照を保存する
@@ -77,6 +78,14 @@ const isGone = (prev, next) => (key) => !(key in next);
 const isEvent = (key) => key.startsWith("on");
 const isProperty = (key) => key !== "children" && !isEvent(key);
 function updateDom(dom, prevProps, nextProps) {
+  // 古い、または変更されたイベントリスナーを削除
+  Object.keys(prevProps)
+    .filter(isEvent)
+    .filter((key) => !(key in nextProps) || isNew(prevProps, nextProps)(key))
+    .forEach((name) => {
+      const eventType = name.toLowerCase().substring(2);
+      dom.removeEventListener(eventType, prevProps[name]);
+    });
   // 古い properties を削除
   Object.keys(prevProps)
     .filter(isProperty)
@@ -93,14 +102,6 @@ function updateDom(dom, prevProps, nextProps) {
       dom[name] = nextProps[name];
     });
 
-  // 古い、または変更されたイベントリスナーを削除
-  Object.keys(prevProps)
-    .filter(isEvent)
-    .filter((key) => !(key in nextProps) || isNew(prevProps, nextProps)(key))
-    .forEach((name) => {
-      const eventType = name.toLowerCase().substring(2);
-      dom.removeEventListener(eventType, prevProps[name]);
-    });
   // イベントリスナーを追加
   Object.keys(nextProps)
     .filter(isEvent)
@@ -146,10 +147,6 @@ function performUnitOfWork(fiber) {
     updateHostComponent(fiber);
   }
 
-  // 子要素ごとに新しいファイバーを作成
-  const elements = fiber.props.children;
-  reconcileChildren(fiber, elements);
-
   // 作業単位を検索。 最初に子要素、次に兄弟、次におじというように試みる
   if (fiber.child) {
     return fiber.child;
@@ -163,9 +160,47 @@ function performUnitOfWork(fiber) {
   }
 }
 
+let wipFiber = null;
+let hookIndex = null;
+
 function updateFunctionComponent(fiber) {
+  wipFiber = fiber;
+  hookIndex = 0;
+  wipFiber.hooks = [];
   const children = [fiber.type(fiber.props)];
   reconcileChildren(fiber, children);
+}
+
+function useState(initial) {
+  const oldHook =
+    wipFiber.alternate &&
+    wipFiber.alternate.hooks &&
+    wipFiber.alternate.hooks[hookIndex];
+  const hook = {
+    state: oldHook ? oldHook.state : initial,
+    queue: [],
+  };
+
+  // 次回コンポーネントをレンダリングするときにこれを行い、古いフックキューからすべてのアクションを取得し、それらを1つずつ新しいフックのstateに適用して、stateを返すときに更新
+  const actions = oldHook ? oldHook.queue : [];
+  actions.forEach((action) => {
+    hook.state = action(hook.state);
+  });
+
+  const setState = (action) => {
+    hook.queue.push(action);
+    wipRoot = {
+      dom: currentRoot.dom,
+      props: currentRoot.props,
+      alternate: currentRoot,
+    };
+    nextUnitOfWork = wipRoot;
+    deletions = [];
+  };
+
+  wipFiber.hooks.push(hook);
+  hookIndex++;
+  return [hook.state, setState];
 }
 
 function updateHostComponent(fiber) {
@@ -173,6 +208,7 @@ function updateHostComponent(fiber) {
   if (!fiber.dom) {
     fiber.dom = createDom(fiber);
   }
+
   reconcileChildren(fiber, fiber.props.children);
 }
 
@@ -240,12 +276,7 @@ function createDom(fiber) {
       : document.createElement(fiber.type);
 
   // children を除く property の割り当て
-  const isProperty = (key) => key !== "children";
-  Object.keys(fiber.props)
-    .filter(isProperty)
-    .forEach((name) => {
-      dom[name] = fiber.props[name];
-    });
+  updateDom(dom, {}, fiber.props);
 
   return dom;
 }
@@ -253,13 +284,15 @@ function createDom(fiber) {
 const Didact = {
   createElement,
   render,
+  useState,
 };
 
 /** @jsx Didact.createElement */
-function App(props) {
-  return <h1>Hi {props.name}</h1>;
+function Counter() {
+  const [state, setState] = Didact.useState(1);
+  return <h1 onClick={() => setState((c) => c + 1)}>Count: {state}</h1>;
 }
 
-const element = <App name="foo" />;
+const element = <Counter />;
 const container = document.getElementById("root");
 Didact.render(element, container);
